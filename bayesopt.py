@@ -92,14 +92,14 @@ class GP:
 
 budget = 30;
 # Feasible region 
-dom = (-1, 2);
+dom = (0, 6);
 
 noise=0.4;
 # Objective function
 #obj_f = lambda x: np.sin(x);
 #obj_f = lambda x: x**3;
-#obj_f = lambda x, noise: -(x-3)**2 + 10 + noise*np.random.randn();
-obj_f = lambda x, noise=0: -np.sin(3*x) - x**2 + 0.7*x + noise * np.random.randn(*x.shape);
+obj_f = lambda x, noise: -(x-3)**2 + 10 + noise*np.random.randn();
+#obj_f = lambda x, noise=0: -np.sin(3*x) - x**2 + 0.7*x + noise * np.random.randn(*x.shape);
 #obj_f = lambda x: (x-1) * (x-2) * (x-3) + 5;
 #acquisitoin function: mean + kappa * variance
 #pyro.ai
@@ -163,14 +163,15 @@ optimum = np.max(y_init);
 optimum_x = init_sample[np.argmax(y_init)];
 n_iter = 8
 
-plt.figure(figsize=(12, n_iter * 3))
-plt.subplots_adjust(hspace=0.4)
+plt.figure(figsize=(12, 3))
+#plt.subplots_adjust(hspace=0.4)
 
 for i in range(n_iter):
     
 
     # Obtain next sampling point from the acquisition function (expected_improvement)
-
+    plt.pause(2);
+    plt.clf();
     mu_s, cov_s = gp.posterior_predictive(X, sigma_y=noise)
 
     EI, X_next = expected_improvement(X, mu_s, cov_s, optimum)
@@ -182,11 +183,11 @@ for i in range(n_iter):
         optimum_x = X_next;
     
     # Plot samples, surrogate function, noise-free objective and next sampling location
-    plt.subplot(n_iter, 2, 2 * i + 1)
+    plt.subplot(1, 2, 1)
     plot_approximation(gp, X, Y, X_next, show_legend=i==0)
     plt.title(f'Iteration {i+1}')
 
-    plt.subplot(n_iter, 2, 2 * i + 2)
+    plt.subplot(1, 2, 2)
     plot_acquisition(X, EI, X_next, show_legend=i==0)
     
     gp.update_post(X_next, Y_next);
@@ -200,7 +201,7 @@ for i in range(n_iter):
 
 #plt.savefig('./gp_plots/2.png');
 #plt.close()
-plt.savefig('plot.png')
+#plt.savefig('plot.png')
 """
 noise = 0.4
 
