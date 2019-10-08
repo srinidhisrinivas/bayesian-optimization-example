@@ -7,6 +7,8 @@ warnings.filterwarnings("error");
 
 def kernel(X1, X2, l=1.0, sigma_f=1.0):
     ''' Isotropic squared exponential kernel. Computes a covariance matrix from points in X1 and X2. Args: X1: Array of m points (m x d). X2: Array of n points (n x d). Returns: Covariance matrix (m x n). '''
+    X1 = X1.reshape(-1,1);
+    X2 = X2.reshape(-1,1);
     sqdist = np.sum(X1**2, 1).reshape(-1, 1) + np.sum(X2**2, 1) - 2 * np.dot(X1, X2.T)
     #print(np.sum(X1**2, 1).reshape(-1, 1) + np.sum(X**2, 1));
     return sigma_f**2 * np.exp(-0.5 / l**2 * sqdist)
@@ -30,9 +32,7 @@ def plot_gp(mu, cov, X, X_train=None, Y_train=None, samples=[], init=0, points=0
     if points and optimum:
         print(points, optimum)
         plt.annotate('Points Sampled: {0}\nMaximum f(x): {1:0.2f}'.format(points, optimum), xy=(0.5,0.90), xycoords='axes fraction');
-        #plt.text(0.05, 0.95, 'Points Sampled: {}'.format(points), fontsize=10, verticalalignment='top', transform=plt.axis.transAxes);
-    #plt.ylim([-2, 2])
-    #plt.xlim([-6, 6]);
+
 
     plt.fill_between(X, mu + uncertainty, mu - uncertainty, alpha=0.1)
     plt.plot(X, mu, label='Mean')
@@ -54,7 +54,6 @@ def plot_gp_2D(gx, gy, mu, X_train, Y_train, title, i):
 
 class GP:
     def __init__(self):
-        #self.mean_func = zero_mean();
         self.X_train = np.array([]).reshape(-1,1);
         self.Y_train = np.array([]).reshape(-1,1);
         pass;
@@ -75,7 +74,7 @@ class GP:
     def posterior_predictive(self, X_s, l=1.0, sigma_f=1.0, sigma_y = 1e-8):
         ''' Computes the suffifient statistics of the GP posterior predictive distribution from m training data X_train and Y_train and n new inputs X_s. Args: X_s: New input locations (n x d). X_train: Training locations (m x d). Y_train: Training targets (m x 1). l: Kernel length parameter. sigma_f: Kernel vertical variation parameter. sigma_y: Noise parameter. Returns: Posterior mean vector (n x d) and covariance matrix (n x n). '''
         K = kernel(self.X_train, self.X_train, l=l, sigma_f=sigma_f) + sigma_y**2 * np.eye(len(self.X_train))
-        #print(K)
+
         K_s = kernel(self.X_train, X_s, l=l, sigma_f=sigma_f)
         K_ss = kernel(X_s, X_s, l=l, sigma_f=sigma_f) + 1e-8 * np.eye(len(X_s))
         K_inv = np.linalg.inv(K)
@@ -83,12 +82,10 @@ class GP:
         # Equation (4)
         mu_s = K_s.T.dot(K_inv).dot(self.Y_train)
 
-        #print(K_inv.shape)
-        #print(K_ss.shape)
-        #print(K_s.shape)
+        
         # Equation (5)
         cov_s = K_ss - K_s.T.dot(K_inv).dot(K_s)
-        #raise np.linalg.LinAlgError('Lol')
+
         return mu_s, cov_s
 
 
@@ -103,9 +100,7 @@ noise=0.4;
 obj_f = lambda x, noise: -(x-3)**2 + 10 + noise*np.random.randn();
 #obj_f = lambda x, noise=0: -np.sin(3*x) - x**2 + 0.7*x + noise * np.random.randn(*x.shape);
 #obj_f = lambda x: (x-1) * (x-2) * (x-3) + 5;
-#acquisitoin function: mean + kappa * variance
-#pyro.ai
-# LM-BFGS
+
 # Classification using GP
 
 def expected_improvement(X, gp, noise, optimum):
@@ -118,7 +113,7 @@ def expected_improvement(X, gp, noise, optimum):
     phi = np.exp(-0.5 * u**2) / np.sqrt(2*np.pi)
     Phi = 0.5 * erfc(-u / np.sqrt(2))
     EI = delta_pos + sigma * phi - np.abs(delta) * Phi
-    return EI, X[np.argmax(EI)][0];
+    return EI;
 
 def plot_approximation(gpr, X, Y, X_next=None, show_legend=False):
     mu, cov = gpr.posterior_predictive(X)
@@ -141,34 +136,37 @@ def plot_acquisition(X, Y, X_next, show_legend=False):
     if show_legend:
         plt.legend()
 
+# Maximize input function using L-BFGS optimization.
 def proposed_point(func, args, bounds):
-    min_val = float(inf);
+    min_val = float('inf');
     min_x = None;
     for x0 in np.random.uniform(bounds[0], bounds[1], 25):
-        res = minimize(func, args=args, x0=x0, bounds=bounds);
-        if func(res.x, *args) < min_val:
-            min_val = func(res.x, *args);
-            min_x = res.x;
+        res = minimize(func, args=args, x0=x0, bounds=[bounds]);
+
+        if func(res.x, *args)[0] < min_val:
+            min_val = func(res.x, *args)[0];
+            min_x = res.x[0];
 
     return min_x
 
-
+def lower_bound(X, gp, noise, optimum=None):
+    mu, cov = gp.posterior_predictive(X, sigma_y=noise);
+    print('diag');
+    print(mu.shape, np.sqrt(np.diag(cov)).shape)
+    return mu - 2*np.sqrt(np.diag(cov)).reshape(-1,1);
 
 #ac_func = lambda x, mu, cov, opt: x[np.argmax(np.diag(cov))][0]
-ac_func = expected_improvement
-#init_sample = np.linspace(dom[0], dom[1], 1);
-#init_sample = np.random.uniform(low=dom[0], high=dom[1], size=2)
+#ac_func = expected_improvement
+ac_func = lower_bound
+
 init_sample = np.array([-0.9, 1.1])
 y_init = obj_f(init_sample, noise)
-#init_sample = init_sample[:-1]
-#init_sample = np.array([-4, -3, -2, -1, 1]).reshape(-1, 1);
-#print(init_sample, obj_f(init_sample));
 
 gp = GP();
 gp.update_post(init_sample, y_init);
 
 n = n0 = init_sample.shape[0];
-X = np.arange(dom[0], dom[1], 0.1).reshape(-1, 1);
+X = np.arange(dom[0], dom[1], 0.01).reshape(-1, 1);
 Y = obj_f(X, 0)
 mu_s, cov_s = gp.posterior_predictive(X)
 
@@ -183,17 +181,16 @@ plt.subplots_adjust(hspace=0.4)
 
 for i in range(n_iter):
     
-
     # Obtain next sampling point from the acquisition function (expected_improvement)
     plt.pause(1);
     plt.clf();
     mu_s, cov_s = gp.posterior_predictive(X, sigma_y=noise)
 
-    #min_acq = lambda X, gp, noise, optimum: -1 * expected_improvement(X, gp, noise, optimum)
-    #X_next = proposed_point(min_acq, args=(gp, noise), optimum)
-    
-    EI, X_next = expected_improvement(X, gp, noise, optimum);
+    min_acq = lambda X, gp, noise, optimum: -1 * ac_func(X, gp, noise, optimum)
 
+    # Maximize the acquisition function to get next sampling point
+    X_next = proposed_point(func=min_acq, args=(gp, noise, optimum), bounds=dom)
+    
     # Obtain next noisy sample from the objective function
     Y_next = obj_f(X_next, noise)
     if Y_next > optimum:
@@ -206,37 +203,14 @@ for i in range(n_iter):
     plt.title(f'Iteration {i+1}')
     #plot_gp(mu_s, cov_s, X, X_train=gp.X_train, Y_train=gp.Y_train, init=len(init_sample), points=n+i, optimum=optimum)
     
+    print(ac_func(X, gp, noise, optimum).shape)
     plt.subplot(1, 2, 2)
-    plot_acquisition(X, EI, X_next, show_legend=i==0)
+    plot_acquisition(X, ac_func(X, gp, noise, optimum), X_next, show_legend=i==0)
     
     plt.show(block=False)
 
     gp.update_post(X_next, Y_next);
 
-#X = np.arange(-5, 5, 0.2).reshape(-1, 1)
-#mu_s, cov_s = gp.posterior_predictive(X)
-#print(cov_s)
 
-#samples = np.random.multivariate_normal(mu_s.ravel(), cov_s, 3)
-#plot_gp(mu_s, cov_s, X, X_train=gp.X_train, Y_train=gp.Y_train, samples=samples, init=5)
 plt.show()
-#plt.savefig('./gp_plots/2.png');
-#plt.close()
-#plt.savefig('plot.png')
-"""
-noise = 0.4
 
-# Noisy training data
-X_train = np.arange(-3, 4, 1).reshape(-1, 1)
-Y_train = np.sin(X_train) + noise * np.random.randn(*X_train.shape)
-
-gp.update_post(X_train, Y_train);
-# Compute mean and covariance of the posterior predictive distribution
-mu_s, cov_s = gp.posterior_predictive(X, sigma_y=noise)
-
-samples = np.random.multivariate_normal(mu_s.ravel(), cov_s, 3)
-plot_gp(mu_s, cov_s, X, X_train=X_train, Y_train=Y_train, samples=samples)
-#plt.savefig('./gp_plots/3.png');
-#plt.close()
-plt.show()
-"""
