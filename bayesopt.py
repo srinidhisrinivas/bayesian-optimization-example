@@ -117,6 +117,7 @@ def expected_improvement(X, gp, noise, optimum):
 
 def plot_approximation(gpr, X, Y, X_next=None, show_legend=False):
     mu, cov = gpr.posterior_predictive(X)
+    print(cov, np.where(np.diag(cov) < 0));
     std = np.sqrt(np.diag(cov));
     plt.fill_between(X.ravel(), 
                      mu.ravel() + 1.96 * std, 
@@ -151,13 +152,12 @@ def proposed_point(func, args, bounds):
 
 def lower_bound(X, gp, noise, optimum=None):
     mu, cov = gp.posterior_predictive(X, sigma_y=noise);
-    print('diag');
-    print(mu.shape, np.sqrt(np.diag(cov)).shape)
+    
     return mu - 2*np.sqrt(np.diag(cov)).reshape(-1,1);
 
 #ac_func = lambda x, mu, cov, opt: x[np.argmax(np.diag(cov))][0]
-#ac_func = expected_improvement
-ac_func = lower_bound
+ac_func = expected_improvement
+#ac_func = lower_bound
 
 init_sample = np.array([-0.9, 1.1])
 y_init = obj_f(init_sample, noise)
