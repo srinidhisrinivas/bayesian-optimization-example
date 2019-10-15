@@ -50,9 +50,6 @@ def plot_gp_2D(gx, gy, mu, X_train, Y_train, title, i):
     ax.scatter(X_train[:,0], X_train[:,1], Y_train, c=Y_train, cmap=cm.coolwarm)
     ax.set_title(title)
 
-def cube(x):
-    return x**3;
-
 class GP:
     def __init__(self):
         #self.mean_func = zero_mean();
@@ -95,13 +92,19 @@ class GP:
 
 budget = 30;
 # Feasible region 
-dom = (0, 3);
+dom = (0, 6);
 
+noise=0.4;
 # Objective function
 #obj_f = lambda x: np.sin(x);
 #obj_f = lambda x: x**3;
-#obj_f = lambda x: -(x-3)**2 + 10;
-obj_f = lambda x: (x-1) * (x-2) * (x-3) + 5;
+obj_f = lambda x, noise: -(x-3)**2 + 10 + noise*np.random.randn();
+#obj_f = lambda x, noise=0: -np.sin(3*x) - x**2 + 0.7*x + noise * np.random.randn(*x.shape);
+#obj_f = lambda x: (x-1) * (x-2) * (x-3) + 5;
+#acquisitoin function: mean + kappa * variance
+#pyro.ai
+# LM-BFGS
+# Classification using GP
 
 def expected_improvement(X, mu, cov, optimum):
     delta = mu - optimum;
@@ -112,68 +115,82 @@ def expected_improvement(X, mu, cov, optimum):
     phi = np.exp(-0.5 * u**2) / np.sqrt(2*np.pi)
     Phi = 0.5 * erfc(-u / np.sqrt(2))
     EI = delta_pos + sigma * phi - np.abs(delta) * Phi
-    return X[np.argmax(EI)][0];
+    return EI, X[np.argmax(EI)][0];
 
-ac_func = lambda x, mu, cov, opt: x[np.argmax(np.diag(cov))][0]
-#ac_func = expected_improvement
+def plot_approximation(gpr, X, Y, X_next=None, show_legend=False):
+    mu, cov = gpr.posterior_predictive(X)
+    std = np.sqrt(np.diag(cov));
+    plt.fill_between(X.ravel(), 
+                     mu.ravel() + 1.96 * std, 
+                     mu.ravel() - 1.96 * std, 
+                     alpha=0.1) 
+    plt.plot(X, Y, 'y--', lw=1, label='Noise-free objective')
+    plt.plot(X, mu, 'b-', lw=1, label='Surrogate function')
+    plt.plot(gpr.X_train, gpr.Y_train, 'kx', mew=3, label='Noisy samples')
+    if X_next:
+        plt.axvline(x=X_next, ls='--', c='k', lw=1)
+    if show_legend:
+        plt.legend()
+
+def plot_acquisition(X, Y, X_next, show_legend=False):
+    plt.plot(X, Y, 'r-', lw=1, label='Acquisition function')
+    plt.axvline(x=X_next, ls='--', c='k', lw=1, label='Next sampling location')
+    if show_legend:
+        plt.legend()
+
+
+#ac_func = lambda x, mu, cov, opt: x[np.argmax(np.diag(cov))][0]
+ac_func = expected_improvement
 #init_sample = np.linspace(dom[0], dom[1], 1);
-init_sample = np.random.uniform(low=dom[0], high=dom[1], size=2)
+#init_sample = np.random.uniform(low=dom[0], high=dom[1], size=2)
+init_sample = np.array([-0.9, 1.1])
+y_init = obj_f(init_sample, noise)
 #init_sample = init_sample[:-1]
 #init_sample = np.array([-4, -3, -2, -1, 1]).reshape(-1, 1);
 #print(init_sample, obj_f(init_sample));
 
 gp = GP();
-gp.update_post(init_sample, obj_f(init_sample));
+gp.update_post(init_sample, y_init);
 
 n = n0 = init_sample.shape[0];
-X = np.arange(dom[0], dom[1], 0.2).reshape(-1, 1);
+X = np.arange(dom[0], dom[1], 0.01).reshape(-1, 1);
+Y = obj_f(X, 0)
 mu_s, cov_s = gp.posterior_predictive(X)
 
 sampled_x = init_sample
 
-optimum = np.max(obj_f(init_sample));
-optimum_x = init_sample[np.argmax(obj_f(init_sample))];
+optimum = np.max(y_init);
+optimum_x = init_sample[np.argmax(y_init)];
+n_iter = 8
 
-while n < budget:
+plt.figure(figsize=(12, 3))
+#plt.subplots_adjust(hspace=0.4)
+
+for i in range(n_iter):
     
-    try:
-        samples = np.random.multivariate_normal(mu_s.ravel(), cov_s, 3)
-    except RuntimeWarning:
-        print('Covariance matrix not positive semi-definite\n')
-        #print(cov_s)
-        break;
-    plt.pause(1)
-    plt.clf()
-    plot_gp(mu_s, cov_s, X, X_train=gp.X_train, Y_train=gp.Y_train, samples=samples, init=len(init_sample), points=n, optimum=optimum)
-    plt.show(block=False)
 
-    sample = ac_func(X, mu_s, cov_s, optimum);
-    sampled_x = np.append(sampled_x, sample)
-    y_sample = obj_f(sample);
-    if optimum < y_sample:
-        optimum = y_sample;
-        optimum_x = sample;
+    # Obtain next sampling point from the acquisition function (expected_improvement)
+    plt.pause(2);
+    plt.clf();
+    mu_s, cov_s = gp.posterior_predictive(X, sigma_y=noise)
 
-    gp.update_post(sample, y_sample);
-    try:
-        mu_s, cov_s = gp.posterior_predictive(X);
-    except np.linalg.LinAlgError:
-        print('Singular Matrix');
-        break;
+    EI, X_next = expected_improvement(X, mu_s, cov_s, optimum)
+    
+    # Obtain next noisy sample from the objective function
+    Y_next = obj_f(X_next, noise)
+    if Y_next > optimum:
+        optimum = Y_next
+        optimum_x = X_next;
+    
+    # Plot samples, surrogate function, noise-free objective and next sampling location
+    plt.subplot(1, 2, 1)
+    plot_approximation(gp, X, Y, X_next, show_legend=i==0)
+    plt.title(f'Iteration {i+1}')
 
-    n += 1;
-
-print(sampled_x)
-print('\n')
-diff_matrix = []
-for i in range(len(sampled_x)):
-    row = []
-    for j in range(len(sampled_x)):
-        row.append(sampled_x[i] - sampled_x[j]);
-    diff_matrix.append(row);
-
-print(np.absolute(np.array(diff_matrix)))
-# Finite number of points
+    plt.subplot(1, 2, 2)
+    plot_acquisition(X, EI, X_next, show_legend=i==0)
+    
+    gp.update_post(X_next, Y_next);
 
 #X = np.arange(-5, 5, 0.2).reshape(-1, 1)
 #mu_s, cov_s = gp.posterior_predictive(X)
@@ -184,7 +201,7 @@ print(np.absolute(np.array(diff_matrix)))
 
 #plt.savefig('./gp_plots/2.png');
 #plt.close()
-plt.show()
+#plt.savefig('plot.png')
 """
 noise = 0.4
 
