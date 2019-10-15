@@ -43,7 +43,7 @@ def plot_gp(gpr, X, X_train=None, Y_train=None, samples=[], init=0, points=0, op
     plt.legend()
 
 
-def expected_improvement(X, gp, noise, optimum):
+def expected_improvement(X, gp, optimum):
     if isinstance(X, np.ndarray):
         X = torch.from_numpy(X).float();
 
@@ -97,20 +97,31 @@ def plot_acquisition(X, Y, X_next, show_legend=False):
 def proposed_point(func, args, bounds):
     min_val = float('inf');
     min_x = None;
-    for x0 in np.random.uniform(bounds[0], bounds[1], 25):
+    for x0 in np.random.uniform(bounds[0], bounds[1], 50):
         res = minimize(func, args=args, x0=x0, bounds=[bounds]);
 
-        if func(res.x, *args)[0] < min_val:
-            min_val = func(res.x, *args)[0];
+        y0 = func(res.x, *args)[0];
+
+        if y0 < min_val:
+            min_val = y0;
+            
             min_x = res.x[0];
 
     return min_x
 
-def lower_bound(X, gp, noise, optimum=None):
-    mu, cov = gp.posterior_predictive(X, sigma_y=noise);
-    print('diag');
-    print(mu.shape, np.sqrt(np.diag(cov)).shape)
-    return mu - 2*np.sqrt(np.diag(cov)).reshape(-1,1);
+def lower_bound(X, gp, optimum=None):
+    if isinstance(X, np.ndarray):
+        X = torch.from_numpy(X).float();
+
+    with torch.no_grad():
+        mu, cov = gpr.forward(X, full_cov=True);
+
+    mu = mu.numpy();
+    cov = cov.numpy();
+    X = X.numpy();
+    std = np.sqrt(np.diag(cov));
+
+    return mu - 2*std;
 
 def update_post(gpr, X, Y):
     X_sample = torch.cat((gpr.X, torch.tensor([X])), 0);
@@ -123,49 +134,57 @@ def update_post(gpr, X, Y):
 
     return gpr
 
-dom=(0,6)
+dom=(-1, 2)
 noise= 0.4;
 # Objective function
 #obj_f = lambda x: np.sin(x);
-#obj_f = lambda x: x**3;
+#obj_f = lambda x, noise=0: x**3 + noise*dist.Normal(0, 1).sample(sample_shape= (1,) if not isinstance(x, torch.Tensor) else x.size());
 #def obj_f(x, noise):
 #    s = (1,) if not isinstance(x, torch.Tensor) else x.size();
 #    return -(x-3)**2 + 10 + noise*dist.Normal(0, 1).sample(sample_shape=s);
 
-obj_f = lambda x, noise: -(x-3)**2 + 10 + noise*dist.Normal(0, 1).sample(sample_shape= (1,) if not isinstance(x, torch.Tensor) else x.size());
-#obj_f = lambda x, noise=0: -np.sin(3*x) - x**2 + 0.7*x + noise * np.random.randn(*x.shape);
+#obj_f = lambda x, noise: -(x-3)**2 + 10 + noise*dist.Normal(0, 1).sample(sample_shape= (1,) if not isinstance(x, torch.Tensor) else x.size());
+def obj_f(x, noise=0):
+    if not isinstance(x, torch.Tensor):
+        x = torch.tensor([x]);
+    return -1.0 * torch.sin(3.0*x) - x**2.0 + 0.7*x + noise * dist.Normal(0, 1).sample(sample_shape= (1,) if not isinstance(x, torch.Tensor) else x.size())
+#obj_f = lambda x, noise=0: -1.0 * torch.sin(3.0*x) - x**2.0 + 0.7*x + noise * dist.Normal(0, 1).sample(sample_shape= (1,) if not isinstance(x, torch.Tensor) else x.size());
 #obj_f = lambda x: (x-1) * (x-2) * (x-3) + 5;
 
 X = torch.arange(dom[0], dom[1], 0.01)#.reshape(-1, 1);
 Y = obj_f(X, 0)
 
-X_sample = dist.Uniform(dom[0], dom[1]).sample(sample_shape=(8,))
+X_sample = dist.Uniform(dom[0], dom[1]).sample(sample_shape=(3,))
 Y_sample = obj_f(X_sample, noise)
+
+X_next = X_sample[-1];
+X_sample = X_sample[:-1];
+
+Y_next = Y_sample[-1];
+Y_sample = Y_sample[:-1];
 
 kernel = gp.kernels.RBF(input_dim=1, variance=torch.tensor(5.), lengthscale=torch.tensor(5.));
 gpr = gp.models.GPRegression(X_sample, Y_sample, kernel, noise=torch.tensor([noise]))
-#gpr = gp.models.GPRegression(kernel, noise=torch.tensor([noise]))
+
 #ac_func = lambda x, mu, cov, opt: x[np.argmax(np.diag(cov))][0]
 ac_func = expected_improvement
 #ac_func = lower_bound
 
 optimum = torch.max(Y_sample);
 optimum_x = X_sample[torch.argmax(Y_sample)];
-n_iter = 14
+n_iter = 10
 
-plt.figure(figsize=(12, 3))
+plt.figure(figsize=(12, n_iter*3))
 plt.subplots_adjust(hspace=0.4)
 
 for i in range(n_iter):
     
-    # Obtain next sampling point from the acquisition function (expected_improvement)
-    plt.pause(1);
-    plt.clf();
+    gpr = update_post(gpr, X_next, Y_next);
 
-    min_acq = lambda X, gpr, noise, optimum: -1 * ac_func(X, gpr, noise, optimum)
+    min_acq = lambda X, gpr, optimum: -1 * ac_func(X, gpr, optimum)
 
     # Maximize the acquisition function to get next sampling point
-    X_next = proposed_point(func=min_acq, args=(gpr, noise, optimum), bounds=dom)
+    X_next = proposed_point(func=min_acq, args=(gpr, optimum), bounds=dom)
     
     # Obtain next noisy sample from the objective function
     Y_next = obj_f(X_next, noise)
@@ -173,22 +192,22 @@ for i in range(n_iter):
         optimum = Y_next
         optimum_x = X_next;
     
+    #plt.pause(0.01);
+    #plt.clf();
     # Plot samples, surrogate function, noise-free objective and next sampling location
-    plt.subplot(1, 2, 1)
+    plt.subplot(n_iter, 2, 2*i + 1)
     plot_approximation(gpr, X, Y, X_next, show_legend=i==0)
     plt.title(f'Iteration {i+1}')
     #plot_gp(mu_s, cov_s, X, X_train=gp.X_train, Y_train=gp.Y_train, init=len(init_sample), points=n+i, optimum=optimum)
     
     #print(X.shape)
-    print(ac_func(X, gpr, noise, optimum).shape)
-    plt.subplot(1, 2, 2)
-    plot_acquisition(X, ac_func(X, gpr, noise, optimum), X_next, show_legend=i==0)
+    #print(ac_func(X, gpr, noise, optimum).shape)
+    plt.subplot(n_iter, 2, 2*i+2)
+    plot_acquisition(X, ac_func(X, gpr, optimum), X_next, show_legend=i==0)
     
-    plt.show(block=False)
+    #plt.show(block=False)
 
-    gpr = update_post(gpr, X_next, Y_next);
     
 
-
-#plt.show()
+plt.savefig('plot.png');
 
